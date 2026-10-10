@@ -20,3 +20,6 @@ modules.order
 *.map
 *.bin
 *.hex
+
+# Firmware build output
+firmware/*/out/
