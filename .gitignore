@@ -1,0 +1,22 @@
+# local agent state and build output
+.workspace/
+build/
+
+# Yocto / SDK output
+tmp/
+downloads/
+sstate-cache/
+*.wic
+*.tar.xz
+
+# Build artifacts
+*.o
+*.ko
+*.mod*
+Module.symvers
+modules.order
+*.cmd
+*.elf
+*.map
+*.bin
+*.hex
