@@ -1,0 +1,36 @@
+From a968787aeeb2287ddf6b0a8ea41fbf512279b03c Mon Sep 17 00:00:00 2001
+From: bjy <gvids@naver.com>
+Date: Sat, 10 Oct 2026 14:05:07 +0900
+Subject: [PATCH] mmc: mmci: stm32: run delay block tuning at 100 MHz on
+ STM32MP25
+
+v6.6-stm32mp-r3.1 sets min_freq to 100 MHz for st,stm32mp25-sdmmc2, so
+sdmmc_execute_tuning() returns early when SDR104 runs at the 100 MHz the
+200 MHz kernel clock allows. The delay block is never enabled and the RX
+sampling clock stays on SDMMC_CLKio. On STM32MP257F-DK with a SanDisk
+Ultra 32 GB card this gives intermittent wrong data on reads (md5 of the
+same file differs between reads, SIGILL in init).
+
+Restore the 50 MHz threshold used by v6.6-stm32mp-r1 so tuning runs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/mmc/host/mmci_stm32_sdmmc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/mmc/host/mmci_stm32_sdmmc.c b/drivers/mmc/host/mmci_stm32_sdmmc.c
+index 29ad3001f..318f8454f 100644
+--- a/drivers/mmc/host/mmci_stm32_sdmmc.c
++++ b/drivers/mmc/host/mmci_stm32_sdmmc.c
+@@ -796,7 +796,7 @@ void sdmmc_variant_init(struct mmci_host *host)
+ 	dlyb->base = base_dlyb;
+ 	if (of_device_is_compatible(np, "st,stm32mp25-sdmmc2")) {
+ 		dlyb->ops = &dlyb_tuning_mp25_ops;
+-		dlyb->min_freq = 100000000;
++		dlyb->min_freq = 50000000;
+ 	} else {
+ 		dlyb->ops = &dlyb_tuning_mp15_ops;
+ 		dlyb->min_freq = 50000000;
+-- 
+2.34.1
+
