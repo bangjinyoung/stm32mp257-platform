@@ -23,3 +23,5 @@ modules.order
 
 # Firmware build output
 firmware/*/out/
+ipc/linux/m33_link_ping
+ipc/linux/m33_link_ping.stripped
