@@ -24,7 +24,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include "FreeRTOS.h"
+#include "task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,7 +36,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define FW_NAME          "m33_freertos M3.5"
+#define LED_PERIOD_MS    100U
+#define RX_QUEUE_LEN     16U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,19 +59,24 @@ static const osThreadAttr_t ShutDown_attributes = {
   .stack_size = 2 * 1024
 };
 
-static osThreadId_t ThreadOneHandle;
-static const osThreadAttr_t ThreadOne_attributes = {
-  .name = "Thread One",
+static osThreadId_t led_thread;
+static const osThreadAttr_t led_thread_attr = {
+  .name = "led",
   .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 512
 };
 
-static osThreadId_t ThreadTwoHandle;
-static const osThreadAttr_t ThreadTwo_attributes = {
-  .name = "Thread Two",
-  .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 512
+/* printf (newlib nano) needs more than the 512 bytes the example used */
+static osThreadId_t console_thread;
+static const osThreadAttr_t console_thread_attr = {
+  .name = "console",
+  .priority = (osPriority_t) osPriorityBelowNormal,
+  .stack_size = 1024
 };
+
+static osMessageQueueId_t rx_queue;
+static uint8_t rx_byte;
+static volatile uint32_t led_toggles;
 
 static IPCC_HandleTypeDef const *hipcc_handle;
 static uint32_t ipcc_ch_id;
@@ -76,23 +85,32 @@ static uint32_t ipcc_ch_id;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-static void ThreadOne_Entry(void *argument);
-static void ThreadTwo_Entry(void *argument);
+static void led_thread_entry(void *argument);
+static void console_thread_entry(void *argument);
+static void console_rx_start(void);
+static void console_rx_done(UART_HandleTypeDef *huart);
+static void console_rx_error(UART_HandleTypeDef *huart);
 static void MX_FREERTOS_DeInit(void);
 static void shutdown_thread_entry(void *argument);
 /* USER CODE END PFP */
 
 static void MX_FREERTOS_DeInit(void)
 {
+  HAL_NVIC_DisableIRQ(UART5_IRQn);
+  (void) HAL_UART_AbortReceive(&hcom_uart[COM_VCP_CM33]);
   HAL_DeInitTick();
   (void) osSemaphoreDelete(ShutDownSemaphore);
-  (void) osThreadTerminate(ThreadOneHandle);
-  (void) osThreadTerminate(ThreadTwoHandle);
+  (void) osThreadTerminate(led_thread);
+  (void) osThreadTerminate(console_thread);
+  (void) osMessageQueueDelete(rx_queue);
 }
 
 static void shutdown_thread_entry(void *argument)
 {
   osSemaphoreAcquire(ShutDownSemaphore, osWaitForever);
+
+  printf("[m33] shutdown tick=%lu led_toggles=%lu\r\n",
+         (unsigned long) osKernelGetTickCount(), (unsigned long) led_toggles);
 
   MX_FREERTOS_DeInit();
 
@@ -148,6 +166,11 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  rx_queue = osMessageQueueNew(RX_QUEUE_LEN, sizeof(uint8_t), NULL);
+  if (NULL == rx_queue)
+  {
+    Error_Handler();
+  }
   /* USER CODE END RTOS_QUEUES */
   /* creation of Task */
   ShutDownThreadHandle = osThreadNew(shutdown_thread_entry, NULL, &ShutDown_attributes);
@@ -156,14 +179,14 @@ void MX_FREERTOS_Init(void) {
     Error_Handler();
   }
 
-  ThreadOneHandle = osThreadNew(ThreadOne_Entry, NULL, &ThreadOne_attributes);
-  if (NULL == ThreadOneHandle)
+  led_thread = osThreadNew(led_thread_entry, NULL, &led_thread_attr);
+  if (NULL == led_thread)
   {
     Error_Handler();
   }
 
-  ThreadTwoHandle = osThreadNew(ThreadTwo_Entry, NULL, &ThreadTwo_attributes);
-  if (NULL == ThreadTwoHandle)
+  console_thread = osThreadNew(console_thread_entry, NULL, &console_thread_attr);
+  if (NULL == console_thread)
   {
     Error_Handler();
   }
@@ -179,71 +202,122 @@ void MX_FREERTOS_Init(void) {
 }
 
 /**
-  * @brief  Toggle LED3 thread
-  * @param  thread not used
-  * @retval None
-  */
-static void ThreadOne_Entry(void *argument)
-{
-  uint32_t count = 0;
-  (void) argument;
-
-  for (;;)
-  {
-    count = osKernelGetTickCount() + 5000;
-    /* Toggle LED3 every 200 ms for 5 s */
-    while (count > osKernelGetTickCount())
-    {
-      BSP_LED_Toggle(LED3);
-      osDelay(200);
-    }
-
-    /* Turn off LED3 */
-    BSP_LED_Off(LED3);
-
-    /* Suspend Thread 1 */
-    osThreadSuspend(ThreadOneHandle);
-
-    count = osKernelGetTickCount() + 5000;
-    /* Toggle LED3 every 500 ms for 5 s */
-    while (count > osKernelGetTickCount())
-    {
-      BSP_LED_Toggle(LED3);
-      osDelay(500);
-    }
-
-    /* Resume Thread 2*/
-    osThreadResume(ThreadTwoHandle);
-  }
-}
-
-/**
-  * @brief  Toggle LED3 thread
+  * @brief  Toggle LED3 every LED_PERIOD_MS, drift-free (absolute wake-up time)
   * @param  argument not used
   * @retval None
   */
-static void ThreadTwo_Entry(void *argument)
+static void led_thread_entry(void *argument)
 {
-  uint32_t count;
+  uint32_t next = osKernelGetTickCount();
   (void) argument;
 
   for (;;)
   {
-    count = osKernelGetTickCount() + 10000;
-    /* Toggle LED3 every 500 ms for 10 s */
-    while (count > osKernelGetTickCount())
-    {
-     BSP_LED_Toggle(LED3);
-     osDelay(500);
-    }
-
-    /* Turn off LED3 */
-    BSP_LED_Off(LED3);
-
-    /* Resume Thread 1 */
-    osThreadResume(ThreadOneHandle);
-
-    /* Suspend Thread 2 */
-    osThreadSuspend(ThreadTwoHandle);
+    BSP_LED_Toggle(LED3);
+    led_toggles++;
+    next += LED_PERIOD_MS;
+    (void) osDelayUntil(next);
   }
+}
+
+static void console_print_info(void)
+{
+  uint32_t hal = HAL_GetHalVersion();
+  uint32_t cpuid = SCB->CPUID;
+
+  printf("\r\n[m33] %s build=%s %s\r\n", FW_NAME, __DATE__, __TIME__);
+  printf("[m33] cpuid=0x%08lx r%lup%lu %s\r\n", (unsigned long) cpuid,
+         (unsigned long) ((cpuid & SCB_CPUID_VARIANT_Msk) >> SCB_CPUID_VARIANT_Pos),
+         (unsigned long) (cpuid & SCB_CPUID_REVISION_Msk),
+#if defined (__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
+         "secure"
+#else
+         "non-secure"
+#endif
+         );
+  printf("[m33] core_clock=%lu Hz\r\n", (unsigned long) SystemCoreClock);
+  printf("[m33] bootsr=0x%08lx developer_boot=%d\r\n",
+         (unsigned long) SYSCFG->BOOTSR, IS_DEVELOPER_BOOT_MODE() ? 1 : 0);
+  /* DBGMCU sits on the debug APB, only clocked when RCC_DBGCFGR.DBGEN is set */
+  if ((RCC->DBGCFGR & RCC_DBGCFGR_DBGEN) != 0U)
+  {
+    printf("[m33] dev_id=0x%03lx rev_id=0x%04lx\r\n",
+           (unsigned long) HAL_GetDEVID(), (unsigned long) HAL_GetREVID());
+  }
+  else
+  {
+    printf("[m33] dev_id=? rev_id=? (debug clock off)\r\n");
+  }
+  printf("[m33] hal=%lu.%lu.%lu freertos=%s tick=%lu Hz heap_free=%lu/%lu\r\n",
+         (unsigned long) (hal >> 24), (unsigned long) ((hal >> 16) & 0xFFU),
+         (unsigned long) ((hal >> 8) & 0xFFU), tskKERNEL_VERSION_NUMBER,
+         (unsigned long) osKernelGetTickFreq(), (unsigned long) xPortGetFreeHeapSize(),
+         (unsigned long) configTOTAL_HEAP_SIZE);
+  printf("[m33] running; led3 period=%lu ms, any key for uptime\r\n", (unsigned long) LED_PERIOD_MS);
+}
+
+static void console_print_uptime(uint8_t ch)
+{
+  uint32_t ms = osKernelGetTickCount();
+  uint32_t s = ms / 1000U;
+
+  printf("[m33] key=0x%02x tick=%lu uptime=%02lu:%02lu:%02lu.%03lu led_toggles=%lu stack_free led=%lu console=%lu\r\n",
+         ch, (unsigned long) ms,
+         (unsigned long) (s / 3600U), (unsigned long) ((s / 60U) % 60U),
+         (unsigned long) (s % 60U), (unsigned long) (ms % 1000U),
+         (unsigned long) led_toggles,
+         (unsigned long) osThreadGetStackSpace(led_thread),
+         (unsigned long) osThreadGetStackSpace(console_thread));
+}
+
+/**
+  * @brief  Print hardware info, then print the uptime for each received byte
+  * @param  argument not used
+  * @retval None
+  */
+static void console_thread_entry(void *argument)
+{
+  uint8_t ch;
+  (void) argument;
+
+  console_print_info();
+  console_rx_start();
+
+  for (;;)
+  {
+    if (osMessageQueueGet(rx_queue, &ch, NULL, osWaitForever) == osOK)
+    {
+      console_print_uptime(ch);
+    }
+  }
+}
+
+static void console_rx_start(void)
+{
+  UART_HandleTypeDef *huart = &hcom_uart[COM_VCP_CM33];
+
+  if ((HAL_UART_RegisterCallback(huart, HAL_UART_RX_COMPLETE_CB_ID, console_rx_done) != HAL_OK) ||
+      (HAL_UART_RegisterCallback(huart, HAL_UART_ERROR_CB_ID, console_rx_error) != HAL_OK))
+  {
+    Error_Handler();
+  }
+  HAL_NVIC_SetPriority(UART5_IRQn, configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY + DEFAULT_IRQ_PRIO, 0);
+  HAL_NVIC_EnableIRQ(UART5_IRQn);
+  if (HAL_UART_Receive_IT(huart, &rx_byte, 1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/* ISR context: hand the byte to the console thread and re-arm */
+static void console_rx_done(UART_HandleTypeDef *huart)
+{
+  (void) osMessageQueuePut(rx_queue, &rx_byte, 0U, 0U);
+  (void) HAL_UART_Receive_IT(huart, &rx_byte, 1);
+}
+
+/* overrun or framing error aborts the reception, so re-arm it */
+static void console_rx_error(UART_HandleTypeDef *huart)
+{
+  (void) HAL_UART_Receive_IT(huart, &rx_byte, 1);
 }

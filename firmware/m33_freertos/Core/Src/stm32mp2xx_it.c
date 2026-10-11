@@ -136,3 +136,11 @@ void IPCC1_RX_IRQHandler(void)
 {
    HAL_IPCC_RX_IRQHandler(&hipcc1);
 }
+
+/**
+* @brief This function handles UART5 (M33 console) interrupt.
+*/
+void UART5_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&hcom_uart[COM_VCP_CM33]);
+}
