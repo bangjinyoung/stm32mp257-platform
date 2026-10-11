@@ -17,8 +17,11 @@
 | C3.1 | M33 firmware load/start/stop | 검증함 | remoteproc sysfs, 3회 | 3/3, 기본 firmware 복구 |
 | C3.1-N | 잘못된 firmware 거부 | 검증함 | 없는 파일, 19 B 텍스트, 8 KiB random | `-2`, `Image is too small`, `bad magic`; Linux 유지 |
 | C3.2 | M33 console, UART RX, LED 100 ms | 검증함 | 키 3개를 5 s 간격으로 전송, tick과 host 시각 비교 | Δtick 5006 / 5005 ms vs host 5.005 / 5.005 s; led_toggles +50 / 5 s; 응답 7–8 ms; stop 시 shutdown 로그 |
-| C4.1 | RPMsg TTY echo | 진행 전 | — | — |
-| C4.2 | RPMsg round-trip latency | 진행 전 | — | — |
+| C4.1 | RPMsg 채널 생성과 TTY echo | 검증함 | M33 OpenAMP firmware start 후 dmesg, 번호 붙인 1000줄을 채널마다 송수신 | `rpmsg-tty` 0x400/0x401, `/dev/ttyRPMSG0/1`; 각 1000/1000 |
+| C4.2 | m33_link round-trip latency | 측정함 | write 직전부터 응답 전체 read와 검사까지 `CLOCK_MONOTONIC`, 크기별 1000회, 순차, 부하 없음 | p50 / p99 / max: 0 B 80.1 / 643.0 / 1575.4, 32 B 105.2 / 227.2 / 915.1, 484 B 483.7 / 1168.3 / 2649.2 µs |
+| C4.3 | 잘못된 frame 거부 | 검증함 | short, magic, version, len, crc, type frame 각 1회 | NACK err 1–6, seq는 magic/version 확인 전 0; 이후 정상 ping 100/100 |
+| C4.4 | 전송 중 M33 정지와 재시작 | 검증함 | 30000회 송신 중 1 s 후 `echo stop`, 이후 start | 정상 8183, 진행 중 1회 timeout, 이후 write 오류(tty 제거), 잘못된 frame 0, Linux 유지; 재시작 후 1000/1000 |
+| C4.5 | GET_STATS | 검증함 | GET_STATS 전후로 ping과 오류 frame을 보내고 카운터 비교 | rx_ok 1 → 102 → 3106, rx_bad 0 → 8이 보낸 요청 수와 일치; payload가 붙은 GET_STATS는 NACK 4; 회귀(ping 3크기, NACK 6종) 통과 |
 
 검증하지 않은 것:
 
@@ -28,3 +31,6 @@
 - M33 UART overrun 후 수신 재개 (코드 경로만 있음)
 - 패치 kernel에서 SDR104 장시간 부하
 - 한 번의 부팅에서만 나온 `videodev` Oops (재현 안 됨, 파일 md5는 정상)
+- IPC latency의 구간별 분해(CRC, 복사, scheduling), 부하·CPU 고정·RT 조건
+- 여러 요청을 동시에 보내는 경우(pipelining), 장시간 송수신
+- M33 crash 감지와 자동 재시작

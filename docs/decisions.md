@@ -9,3 +9,7 @@
 | D-08 | DT 노드는 U-Boot에서 RAM DTB에만 추가 | 카드의 DTB를 바꾸지 않아도 driver probe를 시험할 수 있고, 재부팅하면 원래대로 돌아감 | bootfs DTB 교체, overlay |
 | D-10 | v6.2.1 SD 문제는 kernel 패치로 수정하고 기본 부팅을 패치 kernel로 변경 | DT로 HS 50 MHz로 낮추는 방법은 우회일 뿐 원인을 고치지 않음. 패치는 한 줄이고 측정으로 검증됨 | DT에서 UHS 모드 제거, v6.0 유지 |
 | D-11 | M33 firmware 교체는 `/tmp` + `firmware_class.path` | SD에 쓰지 않고 재부팅하면 원래대로 돌아감 | `/lib/firmware`에 복사 |
+| D-12 | IPC는 `rpmsg_tty` 위에 자체 frame을 둠 | kernel 수정 없이 userspace에서 시험 가능. 메시지 경계는 RPMsg가 지켜 줌 | `rpmsg_char` endpoint, 전용 kernel rpmsg driver |
+| D-13 | frame에 magic, version, seq, len, CRC-16을 둠 | vring은 공유 메모리라 전송 오류보다 버전이 다른 firmware나 잘못된 writer를 거르는 용도. 오류마다 NACK 코드로 원인을 구분 | 헤더 없이 raw payload, RPMsg 길이만 신뢰 |
+| D-14 | M33은 RPMsg 콜백에서 복사와 flag만, 검사와 응답은 main loop에서 | 콜백이 끝나면 vring 버퍼가 반납됨. 콜백 안의 UART 출력이 왕복 시간에 더해지지 않게 함 | 콜백에서 바로 응답 (ST 예제 방식) |
+| D-15 | IPC firmware는 ST bare-metal OpenAMP 예제에서 시작 | 동작이 확인된 기준선에서 프로토콜만 바꿔 원인 분리가 쉬움. FreeRTOS 이전 계획은 `docs/architecture.md` §6 | FreeRTOS + OpenAMP task로 바로 구성 |

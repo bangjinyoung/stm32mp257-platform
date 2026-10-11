@@ -64,7 +64,7 @@ M33 (bare-metal)    OpenAMP(RPMsg/virtio/libmetal) ─ VIRT_UART0 콜백(복사,
 
 - **resource table**: M33 ELF의 `.resource_table`(0x81200000)에 RPMsg vdev 하나와 vring 2개(16칸, 주소 -1)를 적습니다. Linux가 start 때 vring을 할당해 주소와 status를 이 표에 기록하고, M33은 status를 기다렸다가 vring을 만듭니다.
 - **채널**: M33이 endpoint 2개를 `rpmsg-tty` 이름으로 공지하면 Linux가 `/dev/ttyRPMSG0`(0x400), `/dev/ttyRPMSG1`(0x401)을 만듭니다. 같은 주소라도 공장 firmware는 `rpmsg-intc`, `rpmsg_i2c`로 공지하므로 다른 driver가 붙습니다.
-- **메시지**: ttyRPMSG0은 m33_link v1(12 B header: magic, ver, type, seq, len, CRC-16), ttyRPMSG1은 ST 예제의 echo입니다. 형식과 측정은 `ipc/README.md`.
+- **메시지**: ttyRPMSG0은 m33_link v1(12 B header: magic, ver, type, seq, len, CRC-16; PING → PONG, GET_STATS → STATS, 거부 → NACK), ttyRPMSG1은 ST 예제의 echo입니다. 형식과 측정은 `ipc/README.md`.
 - **M33 처리 위치**: IPCC 인터럽트는 flag만 세우고, OpenAMP 처리와 응답은 main loop에서 합니다. 콜백은 vring 칸이 반납되기 전에 데이터를 복사합니다.
 
 | 항목 | 결과 (2026-10-11, 부하 없음, PREEMPT) |
@@ -74,6 +74,7 @@ M33 (bare-metal)    OpenAMP(RPMsg/virtio/libmetal) ─ VIRT_UART0 콜백(복사,
 | 잘못된 frame 6종 | NACK err 1–6, 잘못된 frame 뒤 정상 ping 100/100 |
 | 송신 중 M33 stop | 정상 8183, 진행 중 1회 timeout, 이후 write 오류(tty 제거), 잘못된 frame 0, Linux 유지 |
 | 재시작 | 1000/1000 |
+| GET_STATS | 카운터가 보낸 요청 수와 일치, payload가 붙은 요청은 NACK 4 |
 
 ## 6. RTOS → Linux 기능 분리: 기준과 이 구성의 대응
 
