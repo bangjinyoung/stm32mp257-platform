@@ -8,7 +8,8 @@
 set -eu
 LOG=${1:?usage: $0 <picocom log> [module.ko] [tty]}
 KO=${2:-}
-TTY=${3:-/dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_0037001A3335510533383531-if01}
+# first ST-LINK V3 console; pass [tty] when more than one board is attached
+TTY=${3:-$(ls /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_*-if01 | head -n 1)}
 DIR=$(dirname "$0")
 GPIOC=/soc@0/pinctrl@44240000/gpio@44260000
 ROOT=PARTUUID=e91c4e10-16e6-4c0e-bd0e-77becf4a3582

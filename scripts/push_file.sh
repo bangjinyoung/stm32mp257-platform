@@ -6,7 +6,8 @@
 set -e
 SRC=$1
 DST=$2
-TTY=${3:-/dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_0037001A3335510533383531-if01}
+# first ST-LINK V3 console; pass [tty] when more than one board is attached
+TTY=${3:-$(ls /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_*-if01 | head -n 1)}
 [ -f "$SRC" ] && [ -n "$DST" ] || { echo "usage: $0 <local file> <path on board> [tty]"; exit 1; }
 SIZE=$(stat -c %s "$SRC")
 [ "$SIZE" -le 1048576 ] || { echo "refusing: $SIZE B is too large for the console (max 1 MiB)"; exit 1; }
