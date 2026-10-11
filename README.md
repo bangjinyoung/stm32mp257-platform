@@ -67,6 +67,7 @@ modules/mp2_button/      Platform driver for the USER2 button on PC11
 patches/linux/           SDMMC tuning fix for the v6.2.1 kernel
 scripts/                 Console file transfer, VCP logger, U-Boot DT node injection, boot time measurement
 docs/                    Architecture, decisions, the SD debugging notes, evidence index
+docs/ko/                 Korean versions of the docs (ipc/README.ko.md for ipc/README.md)
 ```
 
 ## Build and run
