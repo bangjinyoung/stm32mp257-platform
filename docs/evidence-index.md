@@ -1,36 +1,36 @@
 # Evidence index
 
-보드에서 실행한 항목과 결과입니다. 상태가 `검증함`인 항목만 보드 로그가 있습니다. 원본 로그와 화면 캡처는 MAC 주소와 보드 serial을 가린 뒤 `evidence/`에 올릴 예정입니다(아직 올리지 않음).
+This page lists each board run with its method and its result. Items marked `Verified` or `Measured` have a board log. The raw logs and screen captures are not public yet. They go to `evidence/` once the MAC address and the board serial are masked.
 
-측정 조건: STM32MP257F-DK (MB1605-MP257F-C01, STM32MP257FAK3 Rev.Y), CN21 USB-C 전원(PC), SanDisk Ultra 32 GB microSD, OpenSTLinux v6.2.1 (A35-TD) + 패치 kernel 6.6.129, 상온. 시간은 host에서 VCP 수신 시각으로 기록했습니다(ms 단위, USB 버퍼링 오차는 측정하지 않음).
+All runs used an STM32MP257F-DK (MB1605-MP257F-C01, STM32MP257FAK3 Rev.Y) powered from a PC through CN21 USB-C, a SanDisk Ultra 32 GB microSD, and OpenSTLinux v6.2.1 (A35-TD) with the patched kernel 6.6.129, at room temperature. The host stamped each VCP line when it arrived, with ms resolution. The USB buffering error was not measured.
 
-| ID | 항목 | 상태 | 방법 | 결과 |
+| ID | Item | Status | Method | Result |
 |---|---|---|---|---|
-| C0.3 | 보드 식별, boot source | 검증함 | 라벨 사진, boot log | MB1605-MP257F-C01, SD boot |
-| C1.2 | boot chain 분석 | 검증함 | 출고 v6.0 boot log를 TF-A 소스의 image id, 실행 중 DT 예약 영역과 대조 | `docs/architecture.md` §1 |
-| C1.3 | 실행 중 DT 확인 | 검증함 | 실행 중 DTB를 console로 전송(sha256 일치) 후 decompile | model, console, `m33@0` remoteproc 노드 |
-| C1.4 | boot 3회, 단계별 시간 | 측정함 | soft reboot 3회, host 시각 | TF-A→login 28.005 / 27.999 / 28.224 s; systemd-analyze 21.248 / 21.276 / 21.467 s |
-| C1.5 | v6.2.1 SD 손상 원인과 수정 | 검증함 | 부팅 조건 4가지 비교, ios, dynamic debug, md5 반복 | 패치 후 tuning `phase:24`, md5 20/20 (`docs/sd-sdr104-tuning.md`) |
-| C2.1 | module build와 load/unload | 검증함 | vermagic 비교, insmod/rmmod 10회 | 10/10, Oops 0, `greet_count=0` → `-EINVAL` |
-| C2.2 | DT probe + GPIO IRQ driver | 검증함 | U-Boot RAM DT에 노드 추가, 버튼 입력 | IRQ 5회 = press 5; debounce 500 ms에서 edge 44 = 20 accepted + 24 ignored (`/proc/interrupts`와 일치) |
-| C2.2-N | probe 실패 경로 | 검증함 | 노드 없음, `gpiomon`으로 line 점유, `button-gpios` 없음 | probe 없음 / `-EBUSY` 후 bind로 복구 / `-ENOENT` |
-| C3.1 | M33 firmware load/start/stop | 검증함 | remoteproc sysfs, 3회 | 3/3, 기본 firmware 복구 |
-| C3.1-N | 잘못된 firmware 거부 | 검증함 | 없는 파일, 19 B 텍스트, 8 KiB random | `-2`, `Image is too small`, `bad magic`; Linux 유지 |
-| C3.2 | M33 console, UART RX, LED 100 ms | 검증함 | 키 3개를 5 s 간격으로 전송, tick과 host 시각 비교 | Δtick 5006 / 5005 ms vs host 5.005 / 5.005 s; led_toggles +50 / 5 s; 응답 7–8 ms; stop 시 shutdown 로그 |
-| C4.1 | RPMsg 채널 생성과 TTY echo | 검증함 | M33 OpenAMP firmware start 후 dmesg, 번호 붙인 1000줄을 채널마다 송수신 | `rpmsg-tty` 0x400/0x401, `/dev/ttyRPMSG0/1`; 각 1000/1000 |
-| C4.2 | m33_link round-trip latency | 측정함 | write 직전부터 응답 전체 read와 검사까지 `CLOCK_MONOTONIC`, 크기별 1000회, 순차, 부하 없음 | p50 / p99 / max: 0 B 80.1 / 643.0 / 1575.4, 32 B 105.2 / 227.2 / 915.1, 484 B 483.7 / 1168.3 / 2649.2 µs |
-| C4.3 | 잘못된 frame 거부 | 검증함 | short, magic, version, len, crc, type frame 각 1회 | NACK err 1–6, seq는 magic/version 확인 전 0; 이후 정상 ping 100/100 |
-| C4.4 | 전송 중 M33 정지와 재시작 | 검증함 | 30000회 송신 중 1 s 후 `echo stop`, 이후 start | 정상 8183, 진행 중 1회 timeout, 이후 write 오류(tty 제거), 잘못된 frame 0, Linux 유지; 재시작 후 1000/1000 |
-| C4.5 | GET_STATS | 검증함 | GET_STATS 전후로 ping과 오류 frame을 보내고 카운터 비교 | rx_ok 1 → 102 → 3106, rx_bad 0 → 8이 보낸 요청 수와 일치; payload가 붙은 GET_STATS는 NACK 4; 회귀(ping 3크기, NACK 6종) 통과 |
+| C0.3 | Board identity, boot source | Verified | Board label photo and boot log | MB1605-MP257F-C01, SD boot |
+| C1.2 | Boot chain analysis | Verified | Factory v6.0 boot log compared with the image IDs in the TF-A source and with the reserved regions in the running DT | `docs/architecture.md` §1 |
+| C1.3 | Running DT | Verified | The running DTB copied over the console (sha256 matched) and decompiled | The model, the console, and the `m33@0` remoteproc node are as expected |
+| C1.4 | 3 boots, time per stage | Measured | 3 soft reboots, timed on the host | TF-A→login 28.005 / 27.999 / 28.224 s. systemd-analyze 21.248 / 21.276 / 21.467 s |
+| C1.5 | Cause and fix of v6.2.1 SD corruption | Verified | 4 boot conditions compared, `ios` read, dynamic debug, repeated md5 | With the patch, tuning logs `phase:24` and md5 matches 20/20 (`docs/sd-sdr104-tuning.md`) |
+| C2.1 | Module build and load/unload | Verified | vermagic compared, insmod and rmmod 10 times | 10/10 with 0 Oops. `greet_count=0` returns `-EINVAL` |
+| C2.2 | DT probe + GPIO IRQ driver | Verified | Node added to the RAM DT in U-Boot, then the button pressed | 5 presses gave 5 IRQs. With 500 ms debounce, 44 edges split into 20 accepted and 24 ignored, matching `/proc/interrupts` |
+| C2.2-N | Probe failure paths | Verified | No node, the line held by `gpiomon`, and no `button-gpios` | No probe. `-EBUSY`, then bind recovered the driver. `-ENOENT` |
+| C3.1 | M33 firmware load/start/stop | Verified | remoteproc sysfs, 3 times | 3/3, and the default firmware came back |
+| C3.1-N | Invalid firmware rejected | Verified | A missing file, a 19 B text file, 8 KiB of random data | `-2`, `Image is too small`, and `bad magic`. Linux stays up |
+| C3.2 | M33 console, UART RX, LED 100 ms | Verified | 3 keys sent 5 s apart, and the tick compared with host time | Δtick 5006 / 5005 ms against host 5.005 / 5.005 s. led_toggles rose by 50 every 5 s. Replies took 7–8 ms. A stop printed the shutdown log |
+| C4.1 | RPMsg channel creation and TTY echo | Verified | dmesg read after starting the M33 OpenAMP firmware, then 1000 numbered lines sent through each channel | `rpmsg-tty` channels at 0x400 and 0x401, `/dev/ttyRPMSG0/1` created, 1000/1000 on each |
+| C4.2 | m33_link round-trip latency | Measured | `CLOCK_MONOTONIC` from just before the write until the whole reply is read and checked. 1000 sequential runs per size, no load | p50 / p99 / max in µs. 0 B 80.1 / 643.0 / 1575.4, 32 B 105.2 / 227.2 / 915.1, 484 B 483.7 / 1168.3 / 2649.2 |
+| C4.3 | Malformed frames rejected | Verified | One short, magic, version, len, crc and type frame each | NACK err 1–6. The NACK seq is 0 when magic or version is wrong. Then 100/100 normal pings |
+| C4.4 | M33 stopped and restarted under traffic | Verified | `echo stop` 1 s into a run of 30000 sends, then start | 8183 OK, 1 timeout for the request in flight, then write errors because the tty is gone. 0 malformed frames, Linux stays up, and 1000/1000 after the restart |
+| C4.5 | GET_STATS | Verified | Pings and malformed frames sent between GET_STATS calls, and the counters compared | rx_ok went 1, 102, 3106 and rx_bad went 0 to 8, matching the requests sent. A GET_STATS with a payload gets NACK 4. Pings at 3 sizes and the 6 NACK cases still pass |
 
-검증하지 않은 것:
+These cases were not tested:
 
-- 20 ms debounce에서 실제 접점 bounce (보드에 RC 필터가 있어 관찰되지 않음)
-- GPIO 획득 이후 단계(IRQ 요청)의 probe 실패 경로
-- `press_count` 읽기와 IRQ handler의 동시성 (unsigned int, lock 없음)
-- M33 UART overrun 후 수신 재개 (코드 경로만 있음)
-- 패치 kernel에서 SDR104 장시간 부하
-- 한 번의 부팅에서만 나온 `videodev` Oops (재현 안 됨, 파일 md5는 정상)
-- IPC latency의 구간별 분해(CRC, 복사, scheduling), 부하·CPU 고정·RT 조건
-- 여러 요청을 동시에 보내는 경우(pipelining), 장시간 송수신
-- M33 crash 감지와 자동 재시작
+- Real contact bounce at 20 ms debounce. The board has an RC filter, and no bounce showed up
+- Probe failures after the driver gets the GPIO, such as a failed IRQ request
+- Reading `press_count` while the IRQ handler writes it. It is an unsigned int with no lock
+- The M33 resuming reception after a UART overrun. Only the code path exists
+- A long SDR104 load on the patched kernel
+- The `videodev` Oops seen in a single boot. It did not come back, and the file md5 was correct
+- Where the IPC time goes (CRC, copies, scheduling), and latency under load, with CPU pinning, or with RT priority
+- Several IPC requests in flight at once, and traffic over hours
+- M33 crash detection and automatic restart

@@ -1,71 +1,71 @@
-# m33_link: A35 ↔ M33 framed messages over RPMsg
+# m33_link, framed messages between the A35 and the M33 over RPMsg
 
-Linux(Cortex-A35)와 M33(bare-metal OpenAMP) 사이에서 RPMsg TTY 위로 주고받는 요청/응답 형식입니다.
+m33_link is the request and response format that Linux on the Cortex-A35 and the bare-metal OpenAMP firmware on the M33 exchange over an RPMsg TTY.
 
 ```text
 Linux userspace            Linux kernel                    M33 (firmware/m33_openamp)
-m33_link_ping  ── write ─► tty_rpmsg ─► virtio vring ─► IPCC ─► OpenAMP ─► VIRT_UART0 callback
+m33_link_ping  ── write ─► rpmsg_tty ─► virtio vring ─► IPCC ─► OpenAMP ─► VIRT_UART0 callback
                                                                           (copy, set flag)
                                                                 main loop: link_srv_handle()
-m33_link_ping  ◄─ read ─── tty_rpmsg ◄─ virtio vring ◄─ IPCC ◄─ VIRT_UART_Transmit(PONG/NACK)
+m33_link_ping  ◄─ read ─── rpmsg_tty ◄─ virtio vring ◄─ IPCC ◄─ VIRT_UART_Transmit(PONG/NACK)
 ```
 
 ## Frame
 
-한 RPMsg 메시지에 한 frame을 담습니다. little endian이고 헤더는 12 B입니다(`m33_link.h`).
+Each RPMsg message carries one frame. Fields are little endian, and the header is 12 B (`m33_link.h`).
 
-| offset | 필드 | 크기 | 설명 |
+| Offset | Field | Size | Meaning |
 |---|---|---|---|
 | 0 | magic | 2 | `0x4C4D` ("ML") |
 | 2 | ver | 1 | 1 |
 | 3 | type | 1 | 1 PING, 2 PONG, 3 NACK, 4 GET_STATS, 5 STATS |
-| 4 | seq | 4 | 요청 번호. 응답은 같은 seq |
-| 8 | len | 2 | payload 길이, 최대 484 B (RPMsg buffer 512 − RPMsg header 16 − 12) |
-| 10 | crc16 | 2 | CRC-16/CCITT-FALSE, crc16 = 0인 헤더 + payload |
+| 4 | seq | 4 | Request number. A reply carries the same seq |
+| 8 | len | 2 | Payload length, at most 484 B (RPMsg buffer 512 minus the 16 B RPMsg header minus 12) |
+| 10 | crc16 | 2 | CRC-16/CCITT-FALSE over the header with crc16 set to 0, then the payload |
 
-M33의 검사 순서와 NACK 코드:
+The M33 checks a frame in this order and sends a NACK with the code of the first check that fails.
 
-| 순서 | 검사 | NACK err | NACK의 seq |
+| Order | Check | NACK err | seq in the NACK |
 |---|---|---|---|
-| 1 | 수신 크기 ≥ 12 | 1 SHORT | 0 |
+| 1 | Received size ≥ 12 | 1 SHORT | 0 |
 | 2 | magic | 2 MAGIC | 0 |
 | 3 | ver | 3 VERSION | 0 |
-| 4 | len ≤ 484, 12 + len = 수신 크기 | 4 LEN | 요청 seq |
-| 5 | crc16 | 5 CRC | 요청 seq |
-| 6 | type = PING 또는 GET_STATS, GET_STATS는 len = 0 | 6 TYPE, len ≠ 0이면 4 LEN | 요청 seq |
+| 4 | len ≤ 484 and 12 + len equals the received size | 4 LEN | Request seq |
+| 5 | crc16 | 5 CRC | Request seq |
+| 6 | type is PING or GET_STATS, and GET_STATS has len 0 | 6 TYPE, or 4 LEN when a GET_STATS has a payload | Request seq |
 
-GET_STATS는 payload 없이 보내고, M33은 STATS(16 B: rx_ok, rx_bad, last_err, reserved 3 B, tick_ms)로 답합니다. GET_STATS도 rx_ok에 셉니다.
+A GET_STATS has no payload. The M33 answers with a STATS frame whose 16 B payload holds rx_ok, rx_bad, last_err, 3 reserved bytes, and tick_ms. The GET_STATS itself counts in rx_ok.
 
-magic과 version이 맞기 전에는 seq를 믿지 않으므로 0을 돌려줍니다. NACK payload에는 오류 코드와 M33의 누적 정상/오류 수신 수가 들어 있습니다.
+The M33 does not trust seq until magic and version match, so it returns 0 for those errors. A NACK payload carries the error code and the M33's running counts of accepted and rejected frames.
 
-## 설계 선택
+## Design choices
 
-- **TTY 위에 frame을 둔 이유:** ST의 `rpmsg_tty` driver를 그대로 쓰면 kernel 수정 없이 userspace에서 시험할 수 있습니다. 메시지 경계는 RPMsg가 지켜 주므로, frame 안의 len은 경계가 아니라 무결성 검사에 씁니다.
-- **CRC를 둔 이유:** vring은 공유 메모리라 전송 오류는 드물지만, 버전이 다른 firmware나 잘못된 writer를 거르는 데 씁니다. 비용은 아래 측정에서 payload 크기에 비례해 보입니다.
-- **M33 처리 위치:** RPMsg callback은 복사와 flag 설정만 하고, 검사와 응답은 main loop에서 합니다. callback 안에서 출력하면 UART 시간이 왕복 시간에 더해집니다(ST 예제는 callback에서 수신 내용을 출력함).
+- The frame rides on a TTY because ST's `rpmsg_tty` driver then works unchanged, and userspace can test the protocol with no kernel change. RPMsg keeps message boundaries, so len inside the frame checks integrity rather than marking a boundary.
+- The CRC is there although the vring is shared memory and bit errors are unlikely. It catches firmware of another protocol version and a writer that ignores the format. Its cost grows with the payload size in the measurements below.
+- The RPMsg callback only copies the data and sets a flag. The main loop checks the frame and replies. A print inside the callback would add the UART time to the round trip, and the ST example prints every message there.
 
-## 측정 (2026-10-11, STM32MP257F-DK, Linux 6.6.129, M33 400 MHz)
+## Measurements (2026-10-11, STM32MP257F-DK, Linux 6.6.129, M33 at 400 MHz)
 
-`m33_link_ping`이 frame을 write하기 직전부터 응답 frame 전체를 read하고 검사할 때까지를 `CLOCK_MONOTONIC`으로 잽니다. 1000회씩, 부하 없음(loadavg 0.10), 요청 하나가 끝나야 다음을 보냅니다.
+`m33_link_ping` reads `CLOCK_MONOTONIC` just before it writes a frame and again after it has read and checked the whole reply. Each size ran 1000 times with no load (loadavg 0.10). The tool sends the next request only after the previous reply arrives.
 
-| payload | ok | min | p50 | p99 | max |
+| Payload | OK | min | p50 | p99 | max |
 |---|---|---|---|---|---|
 | 0 B | 1000/1000 | 70.6 µs | 80.1 µs | 643.0 µs | 1575.4 µs |
 | 32 B | 1000/1000 | 102.4 µs | 105.2 µs | 227.2 µs | 915.1 µs |
 | 484 B | 1000/1000 | 461.1 µs | 483.7 µs | 1168.3 µs | 2649.2 µs |
 
-- p50은 payload 크기에 따라 늘어납니다(0 → 484 B에서 약 +400 µs). 양쪽의 bit 단위 CRC와 복사가 원인으로 보이지만, 구간별로 나눠 재지는 않았습니다(추정).
-- p99와 max의 긴 꼬리는 Linux 쪽 scheduling으로 보입니다. PREEMPT(RT 아님), CPU 고정과 우선순위 설정 없이 잰 값입니다(추정).
+- p50 grows with the payload, by about 400 µs from 0 B to 484 B. The bit-by-bit CRC and the copies on both sides are the likely cause. This is an inference, because the time was not split by stage.
+- The long p99 and max tails most likely come from Linux scheduling. This is also an inference. The kernel was PREEMPT, not RT, and the tool ran with no CPU pinning or priority setting.
 
-## 오류 시험
+## Error tests
 
-| 시험 | 결과 |
+| Test | Result |
 |---|---|
-| SHORT / MAGIC / VERSION / LEN / CRC / TYPE frame 각 1회 | NACK err 1–6, M33 카운터 rx_bad 1→6, rx_ok 3000 유지 |
-| 오류 시험 직후 정상 ping 100회 | 100/100 |
-| 30000회 송신 중 1 s 후 M33 stop | 정상 8183, 진행 중이던 1회 timeout, 이후 21816회 write 오류 (tty 제거). 잘못된 frame 0, Linux 유지 |
-| M33 offline 상태에서 실행 | `open /dev/ttyRPMSG0: No such file or directory` |
-| M33 start 후 1000회 | 1000/1000, p50 105.7 µs |
+| One SHORT, MAGIC, VERSION, LEN, CRC, and TYPE frame each | NACK err 1–6. The M33 counter rx_bad went from 1 to 6 while rx_ok stayed at 3000 |
+| 100 normal pings right after the error tests | 100/100 |
+| M33 stopped 1 s into 30000 sends | 8183 OK and 1 timeout for the request in flight. The next 21816 writes failed because the tty was gone. 0 malformed frames, and Linux stayed up |
+| Tool run while the M33 is offline | `open /dev/ttyRPMSG0: No such file or directory` |
+| 1000 pings after the M33 starts again | 1000/1000, p50 105.7 µs |
 
 ## Build
 

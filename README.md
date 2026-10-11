@@ -1,10 +1,10 @@
 # stm32mp257-platform
 
-STM32MP257F-DK 보드에서 Cortex-A35 Linux와 Cortex-M33 firmware를 함께 올리고, boot chain, kernel driver, M33 firmware 수명주기, A35 ↔ M33 RPMsg 통신을 실제 보드로 검증한 기록입니다.
+This repository brings up Cortex-A35 Linux and Cortex-M33 firmware together on an STM32MP257F-DK board. It covers the boot chain, a GPIO interrupt driver, the M33 firmware lifecycle under Linux remoteproc, and messages between the two cores over RPMsg.
 
-목표는 이기종 SoC(Cortex-A + Cortex-M)에서 RTOS와 Embedded Linux가 역할을 나누는 구조를 직접 bring-up하고, 각 단계를 로그와 측정값으로 보이는 것입니다. 아래 표의 `검증함`은 보드에서 실행하고 로그를 남긴 항목만 뜻합니다.
+Every result below comes from a run on the board, and the run's log is kept. `Verified` in the tables means exactly that. `Measured` means the run produced numbers and no pass criterion was set.
 
-## 구조
+## Structure
 
 ```text
                  STM32MP257F (MB1605-MP257F-C01, Rev.Y)
@@ -19,93 +19,92 @@ STM32MP257F-DK 보드에서 Cortex-A35 Linux와 Cortex-M33 firmware를 함께 �
  └──────────────┬───────────────────────┘   └──────────────┬────────────────┘
                 │ IPCC1 (mailbox: vq0, vq1, shutdown)       │
                 └───── DDR (M33 code/data, vring, resource table) ──────┘
- RIF: OP-TEE가 부팅 때 peripheral과 GPIO를 CID별로 할당 (예: PH6/LD9 → M33)
+ RIF: OP-TEE assigns peripherals and GPIOs to each CID at boot (e.g. PH6/LD9 → M33)
 ```
 
-M33 firmware는 두 가지이고, remoteproc으로 한 번에 하나를 올립니다. 위 그림은 `firmware/m33_freertos`(console, LED)입니다. IPC 시험은 `firmware/m33_openamp`(bare-metal OpenAMP, `/dev/ttyRPMSG0`의 m33_link 서버)로 했습니다. IPC 구성은 `docs/architecture.md` §5에 있습니다.
+The repository has two M33 firmwares, and remoteproc runs one at a time. The figure shows `firmware/m33_freertos`, which drives the console and the LED. The IPC tests ran on `firmware/m33_openamp`, a bare-metal OpenAMP firmware that answers m33_link frames on `/dev/ttyRPMSG0`. `docs/architecture.md` explains both.
 
-자세한 내용은 `docs/architecture.md`에 있습니다.
+## Results
 
-## 결과
-
-| 영역 | 항목 | 상태 | 핵심 근거 |
+| Area | Item | Status | Key evidence |
 |---|---|---|---|
-| Boot | 출고 이미지 boot chain 분석 (ROM → TF-A BL2 → BL31 → OP-TEE → U-Boot → Linux) | 검증함 | boot log의 image id와 load 주소를 TF-A 소스 정의, 실행 중 DT 예약 영역과 대조 |
-| Boot | OpenSTLinux v6.2.1 Starter를 두 번째 microSD로 bring-up | 검증함 (kernel patch 적용) | 기본 kernel은 SD 읽기 데이터가 깨짐. 원인과 수정은 `docs/sd-sdr104-tuning.md` |
-| Boot | 단계별 boot time 3회 측정 | 측정함 | TF-A→login 28.0 / 28.0 / 28.2 s, systemd-analyze 21.2–21.5 s |
-| Kernel | out-of-tree module build (vermagic 일치), load/unload 10회, 잘못된 parameter 거부 | 검증함 | `modules/hello` |
-| Kernel | DT 노드로 probe되는 GPIO interrupt platform driver | 검증함 | `modules/mp2_button`: devm GPIO, threaded IRQ, debounce, sysfs `press_count` |
-| Kernel | 실패 경로: DT 노드 없음, GPIO 사용 중(-EBUSY), GPIO 속성 없음(-ENOENT) | 검증함 | probe 실패 후 시스템 유지, unbind/bind로 복구 |
-| RTOS | 자체 빌드 FreeRTOS firmware를 remoteproc으로 load/start/stop 3회 | 검증함 | 공장 USB-PD firmware 정지 → 교체 → 복구 |
-| RTOS | 잘못된 firmware (없음, 너무 작음, ELF 아님) 거부 | 검증함 | `Boot failed: -2 / -22`, Linux 유지 |
-| RTOS | M33 console: HW 정보 출력, UART RX interrupt → uptime, LED 100 ms | 검증함 | tick 간격 5006 ms vs host 5.005 s, LED toggle 50회 / 5 s |
-| IPC | RPMsg TTY echo, 채널 2개 | 검증함 | `/dev/ttyRPMSG0`, `/dev/ttyRPMSG1` 각 1000/1000 |
-| IPC | 자체 frame 프로토콜 m33_link (magic, version, seq, len, CRC-16; PING/PONG/NACK/GET_STATS) | 검증함 | `ipc/README.md` |
-| IPC | round-trip latency, 크기별 1000회 | 측정함 | p50 0 B 80.1, 32 B 105.2, 484 B 483.7 µs (부하 없음, PREEMPT) |
-| IPC | 잘못된 frame 6종 거부, 전송 중 M33 정지와 재시작 | 검증함 | NACK 1–6; 정지 중 잘못된 frame 0, Linux 유지, 재시작 후 1000/1000 |
-| IPC | GET_STATS로 M33 수신 카운터 조회 | 검증함 | 카운터가 보낸 요청 수와 일치, payload가 붙은 요청은 NACK |
-| 설계 | RTOS → Linux 기능 분리 | 기준과 실제 구성 대응, 이후 단계는 설계만 | `docs/architecture.md` §6 |
+| Boot | Boot chain of the factory image (ROM, TF-A BL2, BL31, OP-TEE, U-Boot, Linux) | Verified | Image IDs and load addresses in the boot log match the TF-A source and the reserved regions in the running DT |
+| Boot | OpenSTLinux v6.2.1 Starter on a second microSD | Verified with a kernel patch | The stock kernel corrupts data read from SD. `docs/sd-sdr104-tuning.md` has the cause and the fix |
+| Boot | Boot time per stage, 3 runs | Measured | TF-A to login 28.0 / 28.0 / 28.2 s, systemd-analyze 21.2–21.5 s |
+| Kernel | Out-of-tree module with matching vermagic, 10 load and unload cycles, bad parameter rejected | Verified | `modules/hello` |
+| Kernel | GPIO interrupt platform driver probed from a DT node | Verified | `modules/mp2_button` uses devm GPIO, a threaded IRQ, debounce, and a sysfs `press_count` |
+| Kernel | Probe failure with no DT node, a busy GPIO (-EBUSY), or no GPIO property (-ENOENT) | Verified | Linux stays up after the failed probe, and unbind then bind recovers the driver |
+| RTOS | Own FreeRTOS firmware loaded, started, and stopped through remoteproc, 3 times | Verified | The factory USB-PD firmware was stopped, replaced, and restored each time |
+| RTOS | Missing, too small, and non-ELF firmware rejected | Verified | `Boot failed: -2 / -22`, Linux stays up |
+| RTOS | M33 console prints HW info, answers each received character with the uptime, and blinks the LED every 100 ms | Verified | The tick advanced 5006 ms while the host clock advanced 5.005 s, and the LED toggled 50 times in 5 s |
+| IPC | RPMsg TTY echo on two channels | Verified | 1000/1000 lines on each of `/dev/ttyRPMSG0` and `/dev/ttyRPMSG1` |
+| IPC | m33_link, a frame protocol with magic, version, seq, len, and CRC-16 (PING, PONG, NACK, GET_STATS) | Verified | `ipc/README.md` |
+| IPC | Round-trip latency, 1000 runs per payload size | Measured | p50 is 80.1 µs at 0 B, 105.2 µs at 32 B, and 483.7 µs at 484 B, with no load on a PREEMPT kernel |
+| IPC | Six kinds of malformed frame, and an M33 stop under traffic | Verified | NACK codes 1–6. No malformed frame reached the client during the stop, Linux stayed up, and 1000/1000 pings passed after the restart |
+| IPC | GET_STATS reads the M33 receive counters | Verified | The counters match the requests sent. A GET_STATS with a payload gets a NACK |
+| Design | Which functions stay on the RTOS and which move to Linux | Criteria mapped to this setup, later stages are design only | `docs/architecture.md` §6 |
 
-전체 항목과 측정 방법은 `docs/evidence-index.md`에 있습니다.
+`docs/evidence-index.md` lists every item with its method.
 
-## 대표 문제: v6.2.1 SD 읽기 데이터 손상
+## The v6.2.1 SD corruption
 
-ST v6.2.1 이미지로 부팅하면 init이 SIGILL로 죽거나, 같은 파일의 md5가 읽을 때마다 달라졌습니다. DDR, CPU 주파수, EL2를 하나씩 배제한 결과, SDR104 모드에서 SDMMC delay-block tuning이 실행되지 않는 것이 원인이었습니다.
+With the ST v6.2.1 image, init died with SIGILL, or the same file gave a different md5 on each read. DDR, CPU frequency, and EL2 each tested clean. The cause was SDMMC delay-block tuning, which never ran in SDR104 mode.
 
-- v6.6-stm32mp-r3.1은 STM32MP25의 tuning 최소 주파수를 100 MHz로 올렸습니다.
-- 이 보드의 SDR104는 실제 100 MHz로 동작하므로 `actual_clock <= min_freq` 조건에 걸려 tuning을 건너뜁니다.
-- 기준을 r1의 50 MHz로 되돌린 패치(`patches/linux/0001-…`)를 적용하자 tuning 로그(`phase:24`)가 나타나고 md5 20/20이 일치했습니다.
+- v6.6-stm32mp-r3.1 raised the tuning minimum frequency for STM32MP25 to 100 MHz.
+- SDR104 on this board runs at exactly 100 MHz, so the `actual_clock <= min_freq` check skips tuning.
+- A one-line patch restores the r1 threshold of 50 MHz (`patches/linux/0001-…`). With it, the tuning log shows `phase:24` and md5 matches 20 times out of 20.
 
-과정은 `docs/sd-sdr104-tuning.md`에 정리했습니다.
+`docs/sd-sdr104-tuning.md` walks through the investigation.
 
-## 저장소 구성
+## Repository layout
 
 ```text
-firmware/m33_freertos/   M33 FreeRTOS app + Makefile (STM32CubeMP2 v1.3.2 기반, ST 파일은 원래 고지 유지)
-firmware/m33_openamp/    M33 OpenAMP firmware: ttyRPMSG0 m33_link 서버, ttyRPMSG1 echo (ST OpenAMP_TTY_echo 기반)
-ipc/                     m33_link frame 정의(m33_link.h), Linux 시험 도구(linux/m33_link_ping.c), 측정 기록
-modules/hello/           최소 kernel module (parameter 범위 검사)
-modules/mp2_button/      USER2 버튼 (PC11) platform driver
-patches/linux/           v6.2.1 kernel SDMMC tuning 수정
-scripts/                 console 파일 전송, VCP 로거, U-Boot DT 노드 주입, boot time 측정
-docs/                    구조, 결정, 디버깅 기록, evidence index
+firmware/m33_freertos/   M33 FreeRTOS app and Makefile, based on STM32CubeMP2 v1.3.2 (ST files keep their notices)
+firmware/m33_openamp/    M33 OpenAMP firmware with the m33_link server on ttyRPMSG0 and echo on ttyRPMSG1, based on ST OpenAMP_TTY_echo
+ipc/                     m33_link frame definition (m33_link.h), Linux test tool (linux/m33_link_ping.c), measurements
+modules/hello/           Minimal kernel module with a parameter range check
+modules/mp2_button/      Platform driver for the USER2 button on PC11
+patches/linux/           SDMMC tuning fix for the v6.2.1 kernel
+scripts/                 Console file transfer, VCP logger, U-Boot DT node injection, boot time measurement
+docs/                    Architecture, decisions, the SD debugging notes, evidence index
 ```
 
-## 재현
+## Build and run
 
-환경: Windows + WSL2 (Ubuntu 22.04), usbipd로 ST-LINK 연결, OpenSTLinux v6.2.1 Developer Package SDK, STM32CubeCLT 1.22.0 (GCC 14.3.1), STM32CubeMP2 v1.3.2.
+The host is Windows with WSL2 (Ubuntu 22.04), and usbipd attaches the ST-LINK to WSL. The toolchains are the OpenSTLinux v6.2.1 Developer Package SDK, STM32CubeCLT 1.22.0 (GCC 14.3.1), and STM32CubeMP2 v1.3.2.
 
 ```sh
-# kernel module (SDK environment-setup을 source한 셸)
+# kernel module (in a shell that sourced the SDK environment-setup)
 make -C modules/mp2_button KDIR=<kernel build dir>
 
 # M33 firmware
 make -C firmware/m33_freertos CUBE=<STM32CubeMP2 v1.3.2>
 make -C firmware/m33_openamp CUBE=<STM32CubeMP2 v1.3.2>
 
-# Linux IPC 시험 도구 (SDK environment-setup을 source한 셸)
+# Linux IPC test tool (in a shell that sourced the SDK environment-setup)
 make -C ipc/linux
 
-# 보드: M33 firmware 교체. remoteproc 번호는 부팅마다 바뀔 수 있어 name으로 찾습니다.
+# On the board, replace the M33 firmware.
+# The remoteproc number can change between boots, so look it up by name.
 M=$(grep -l '^m33$' /sys/class/remoteproc/*/name | xargs dirname)
 echo stop > $M/state
 echo -n /tmp > /sys/module/firmware_class/parameters/path
 echo -n m33_freertos_stripped.elf > $M/firmware
 echo start > $M/state
 
-# IPC (m33_openamp firmware 실행 중)
+# IPC, with the m33_openamp firmware running
 ./m33_link_ping -n 1000 -s 32     # round trip
-./m33_link_ping -x crc            # 오류 frame → NACK
-./m33_link_ping -S                # M33 수신 카운터
+./m33_link_ping -x crc            # a malformed frame gets a NACK
+./m33_link_ping -S                # M33 receive counters
 ```
 
-## 범위 밖
+## Not covered
 
-- `rpmsg_char`나 전용 kernel rpmsg driver와의 비교, 부하·CPU 고정·PREEMPT_RT 조건의 latency
-- M33 crash 감지와 자동 재시작, watchdog
-- Yocto 전체 빌드, PREEMPT_RT, NPU (X-LINUX-AI)
-- 보안 lifecycle 변경 (OTP, secure boot). Secure boot는 별도 프로젝트(STM32H573 STiRoT → MCUboot)에서 다룹니다.
+- A comparison with `rpmsg_char` or a dedicated kernel rpmsg driver, and latency under load, with CPU pinning, or on PREEMPT_RT
+- M33 crash detection, automatic restart, and a watchdog
+- A full Yocto build and the NPU (X-LINUX-AI)
+- Security lifecycle changes such as OTP or secure boot. A separate project covers secure boot on STM32H573 (STiRoT, then MCUboot).
 
-## 라이선스
+## License
 
-저장소 코드는 MIT (`LICENSE`)입니다. `firmware/m33_freertos/`, `firmware/m33_openamp/`의 ST 파일은 원래 고지(`LICENSE-ST.md`)를 따르고, `modules/`는 GPL-2.0, `patches/linux/`는 Linux kernel 라이선스를 따릅니다.
+The repository code is MIT (`LICENSE`). The ST files in `firmware/m33_freertos/` and `firmware/m33_openamp/` keep their original notice (`LICENSE-ST.md`). `modules/` is GPL-2.0, and `patches/linux/` follows the Linux kernel license.
