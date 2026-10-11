@@ -29,6 +29,7 @@ C_SRCS := \
  $(HALS)/stm32mp2xx_hal_pwr_ex.c $(HALS)/stm32mp2xx_hal_rcc.c $(HALS)/stm32mp2xx_hal_rcc_ex.c \
  $(HALS)/stm32mp2xx_hal_uart.c $(HALS)/stm32mp2xx_hal_uart_ex.c $(HALS)/stm32mp2xx_hal_dcache.c \
  $(APP)/Core/Src/main.c $(APP)/Core/Src/stm32mp2xx_hal_msp.c $(APP)/Core/Src/stm32mp2xx_it.c \
+ $(APP)/Core/Src/link_srv.c \
  $(CUBE)/Utilities/Services/GenericServices/syscalls.c \
  $(APP)/OPENAMP/mbox_ipcc.c $(APP)/OPENAMP/openamp.c $(APP)/OPENAMP/openamp_log.c \
  $(APP)/OPENAMP/rsc_table.c \
@@ -52,7 +53,7 @@ C_DEFS := -DSTM32MP257Cxx -DICACHE_DCACHE_USE -DSTM32MP25xxxx -DCORE_CM33 -DUSE_
  -DLINUX_RPROC_MASTER
 AS_DEFS := -DSTM32MP257Cxx -DSTM32MP25xxxx
 
-C_INCS := -I$(APP)/Core/Inc -I$(CUBE)/Utilities/ResourcesManager -I$(APP)/OPENAMP \
+C_INCS := -I$(APP)/Core/Inc -I$(APP)/../../ipc -I$(CUBE)/Utilities/ResourcesManager -I$(APP)/OPENAMP \
  -I$(OAMP)/open-amp/lib/include -I$(METAL_INC) -I$(OAMP)/virtual_driver \
  -I$(CUBE)/Drivers/CMSIS/Device/ST/STM32MP2xx/Include -I$(CUBE)/Drivers/CMSIS/Core/Include \
  -I$(CUBE)/Drivers/STM32MP2xx_HAL_Driver/Inc -I$(CUBE)/Drivers/BSP/STM32MP257F-DK \

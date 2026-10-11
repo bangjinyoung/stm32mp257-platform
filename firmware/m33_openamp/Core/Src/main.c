@@ -18,6 +18,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "copro_sync.h"
+#include "m33_link.h"
+#include "link_srv.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* Private typedef -----------------------------------------------------------*/
@@ -39,6 +41,7 @@ VIRT_UART_HandleTypeDef huart1;
 __IO FlagStatus VirtUart0RxMsg = RESET;
 uint8_t VirtUart0ChannelBuffRx[MAX_BUFFER_SIZE];
 uint16_t VirtUart0ChannelRxSize = 0;
+static uint8_t link_tx[MAX_BUFFER_SIZE];
 
 __IO FlagStatus VirtUart1RxMsg = RESET;
 uint8_t VirtUart1ChannelBuffRx[MAX_BUFFER_SIZE];
@@ -66,6 +69,7 @@ void VIRT_UART1_RxCpltCallback(VIRT_UART_HandleTypeDef *huart);
 int main(void)
 {
   unsigned int counter = 0;
+  uint32_t link_bad_seen = 0;
 
   /* STM32MP2xx HAL library initialization:
      - Configure the Systick to generate an interrupt each 1 msec
@@ -140,6 +144,7 @@ int main(void)
   }
 
   loc_printf("Virtual UART1 OpenAMP-rpmsg channel creation\r\n");
+  loc_printf("[m33] m33_link v%u on ttyRPMSG0, echo on ttyRPMSG1\r\n", M33_LINK_VERSION);
   if (VIRT_UART_Init(&huart1) != VIRT_UART_OK) {
     loc_printf("VIRT_UART_Init UART1 failed.\r\n");
     Error_Handler();
@@ -164,8 +169,18 @@ int main(void)
 
     if (VirtUart0RxMsg)
     {
+      uint16_t len;
+
       VirtUart0RxMsg = RESET;
-      VIRT_UART_Transmit(&huart0, VirtUart0ChannelBuffRx, VirtUart0ChannelRxSize);
+      /* ttyRPMSG0 carries m33_link frames (ipc/m33_link.h) */
+      len = link_srv_handle(VirtUart0ChannelBuffRx, VirtUart0ChannelRxSize, link_tx);
+      VIRT_UART_Transmit(&huart0, link_tx, len);
+      if (link_srv_stats()->rx_bad != link_bad_seen)
+      {
+        link_bad_seen = link_srv_stats()->rx_bad;
+        loc_printf("[m33] link nack err=%u rx_ok=%lu rx_bad=%lu\r\n", link_srv_stats()->last_err,
+                   (unsigned long) link_srv_stats()->rx_ok, (unsigned long) link_bad_seen);
+      }
     }
 
     if (VirtUart1RxMsg)
@@ -316,10 +331,8 @@ static void MPU_Config(void)
 void VIRT_UART0_RxCpltCallback(VIRT_UART_HandleTypeDef *huart)
 {
 
-    loc_printf("Msg received on VIRTUAL UART0 channel:  %s \n\r", (char *) huart->pRxBuffPtr);
-
-    /* copy received msg in a variable to sent it back to master processor in main infinite loop*/
-    VirtUart0ChannelRxSize = huart->RxXferSize < MAX_BUFFER_SIZE? huart->RxXferSize : MAX_BUFFER_SIZE-1;
+    /* binary frames: no per-message print, it would also add UART time to the round trip */
+    VirtUart0ChannelRxSize = huart->RxXferSize < MAX_BUFFER_SIZE ? huart->RxXferSize : MAX_BUFFER_SIZE;
     memcpy(VirtUart0ChannelBuffRx, huart->pRxBuffPtr, VirtUart0ChannelRxSize);
     VirtUart0RxMsg = SET;
 }
