@@ -18,7 +18,7 @@ m33_link_ping  ◄─ read ─── tty_rpmsg ◄─ virtio vring ◄─ IPCC �
 |---|---|---|---|
 | 0 | magic | 2 | `0x4C4D` ("ML") |
 | 2 | ver | 1 | 1 |
-| 3 | type | 1 | 1 PING, 2 PONG, 3 NACK |
+| 3 | type | 1 | 1 PING, 2 PONG, 3 NACK, 4 GET_STATS, 5 STATS |
 | 4 | seq | 4 | 요청 번호. 응답은 같은 seq |
 | 8 | len | 2 | payload 길이, 최대 484 B (RPMsg buffer 512 − RPMsg header 16 − 12) |
 | 10 | crc16 | 2 | CRC-16/CCITT-FALSE, crc16 = 0인 헤더 + payload |
@@ -32,7 +32,9 @@ M33의 검사 순서와 NACK 코드:
 | 3 | ver | 3 VERSION | 0 |
 | 4 | len ≤ 484, 12 + len = 수신 크기 | 4 LEN | 요청 seq |
 | 5 | crc16 | 5 CRC | 요청 seq |
-| 6 | type = PING | 6 TYPE | 요청 seq |
+| 6 | type = PING 또는 GET_STATS, GET_STATS는 len = 0 | 6 TYPE, len ≠ 0이면 4 LEN | 요청 seq |
+
+GET_STATS는 payload 없이 보내고, M33은 STATS(16 B: rx_ok, rx_bad, last_err, reserved 3 B, tick_ms)로 답합니다. GET_STATS도 rx_ok에 셉니다.
 
 magic과 version이 맞기 전에는 seq를 믿지 않으므로 0을 돌려줍니다. NACK payload에는 오류 코드와 M33의 누적 정상/오류 수신 수가 들어 있습니다.
 

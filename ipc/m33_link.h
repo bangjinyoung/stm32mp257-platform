@@ -11,9 +11,9 @@
  *   +-------+-----+------+--------+--------+--------+---------------+
  *
  * crc16 is CRC-16/CCITT-FALSE over the header with crc16 = 0, then the
- * payload. The M33 answers PING with PONG (same seq, same payload) and
- * any frame it rejects with NACK (seq of the request when it could be
- * read, else 0).
+ * payload. The M33 answers PING with PONG (same seq, same payload),
+ * GET_STATS (no payload) with STATS, and any frame it rejects with NACK
+ * (seq of the request when it could be read, else 0).
  */
 #ifndef M33_LINK_H
 #define M33_LINK_H
@@ -32,6 +32,8 @@ enum m33_link_type {
 	M33_LINK_PING = 1,
 	M33_LINK_PONG = 2,
 	M33_LINK_NACK = 3,
+	M33_LINK_GET_STATS = 4,
+	M33_LINK_STATS = 5,
 };
 
 enum m33_link_err {
@@ -61,8 +63,18 @@ struct m33_link_nack {
 	uint32_t rx_bad;
 };
 
+/* STATS payload */
+struct m33_link_stats {
+	uint32_t rx_ok;
+	uint32_t rx_bad;
+	uint8_t last_err;
+	uint8_t reserved[3];
+	uint32_t tick_ms;	/* M33 HAL tick */
+};
+
 _Static_assert(sizeof(struct m33_link_hdr) == M33_LINK_HDR_SIZE, "header layout");
 _Static_assert(sizeof(struct m33_link_nack) == 12, "nack layout");
+_Static_assert(sizeof(struct m33_link_stats) == 16, "stats layout");
 
 static inline uint16_t m33_link_crc16(uint16_t crc, const uint8_t *buf, size_t len)
 {

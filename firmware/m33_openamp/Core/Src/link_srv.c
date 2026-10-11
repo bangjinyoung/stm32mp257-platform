@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 /*
- * m33_link server: answers PING with PONG and rejects malformed frames
- * with NACK. Runs from the main loop, never from the RPMsg callback.
+ * m33_link server: answers PING with PONG, GET_STATS with STATS, and
+ * rejects malformed frames with NACK. Runs from the main loop, never
+ * from the RPMsg callback.
  */
 #include <string.h>
+#include "stm32mp2xx_hal.h"
 #include "m33_link.h"
 #include "link_srv.h"
 
@@ -27,21 +29,43 @@ static uint16_t build_frame(uint8_t *tx, uint8_t type, uint32_t seq,
 	return (uint16_t)(sizeof(hdr) + len);
 }
 
+static uint16_t build_stats(uint8_t *tx, uint32_t seq)
+{
+	struct m33_link_stats st = {
+		.rx_ok = stats.rx_ok,
+		.rx_bad = stats.rx_bad,
+		.last_err = stats.last_err,
+		.tick_ms = HAL_GetTick(),
+	};
+
+	return build_frame(tx, M33_LINK_STATS, seq, (const uint8_t *)&st, sizeof(st));
+}
+
 static uint8_t check_frame(const uint8_t *rx, uint16_t rx_len, struct m33_link_hdr *hdr)
 {
 	if (rx_len < M33_LINK_HDR_SIZE)
 		return M33_LINK_E_SHORT;
+
 	memcpy(hdr, rx, sizeof(*hdr));
+
 	if (hdr->magic != M33_LINK_MAGIC)
 		return M33_LINK_E_MAGIC;
+
 	if (hdr->ver != M33_LINK_VERSION)
 		return M33_LINK_E_VERSION;
+
 	if (hdr->len > M33_LINK_PAYLOAD_MAX || M33_LINK_HDR_SIZE + hdr->len != rx_len)
 		return M33_LINK_E_LEN;
+
 	if (m33_link_frame_crc(hdr, rx + M33_LINK_HDR_SIZE) != hdr->crc16)
 		return M33_LINK_E_CRC;
-	if (hdr->type != M33_LINK_PING)
+
+	if (hdr->type != M33_LINK_PING && hdr->type != M33_LINK_GET_STATS)
 		return M33_LINK_E_TYPE;
+
+	if (hdr->type == M33_LINK_GET_STATS && hdr->len != 0)
+		return M33_LINK_E_LEN;
+
 	return M33_LINK_OK;
 }
 
@@ -53,6 +77,9 @@ uint16_t link_srv_handle(const uint8_t *rx, uint16_t rx_len, uint8_t *tx)
 
 	if (err == M33_LINK_OK) {
 		stats.rx_ok++;
+		if (hdr.type == M33_LINK_GET_STATS)
+			return build_stats(tx, hdr.seq);
+
 		return build_frame(tx, M33_LINK_PONG, hdr.seq, rx + M33_LINK_HDR_SIZE, hdr.len);
 	}
 

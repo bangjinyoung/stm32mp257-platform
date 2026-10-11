@@ -4,7 +4,7 @@
  * each PONG and measure the round trip with CLOCK_MONOTONIC.
  *
  * usage: m33_link_ping [-d tty] [-n count] [-s payload] [-t timeout_ms]
- *                      [-o csv] [-x short|magic|version|len|crc|type]
+ *                      [-o csv] [-x short|magic|version|len|crc|type|statslen] [-S]
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -25,6 +25,7 @@ struct opts {
 	unsigned int count;
 	unsigned int size;
 	int timeout_ms;
+	int stats;
 };
 
 static uint64_t now_ns(void)
@@ -62,11 +63,14 @@ static int read_full(int fd, uint8_t *buf, size_t len, int timeout_ms, uint64_t 
 
 		if (left <= 0)
 			return -ETIMEDOUT;
+
 		if (poll(&pfd, 1, (int)(left < timeout_ms ? left : timeout_ms)) <= 0)
 			return -ETIMEDOUT;
+
 		n = read(fd, buf + got, len - got);
 		if (n < 0)
 			return -errno;
+
 		got += (size_t)n;
 	}
 	return 0;
@@ -85,6 +89,7 @@ static size_t build_ping(uint8_t *frame, uint32_t seq, unsigned int size)
 
 	for (unsigned int i = 0; i < size; i++)
 		payload[i] = (uint8_t)(seq + i);
+
 	hdr.crc16 = m33_link_frame_crc(&hdr, payload);
 	memcpy(frame, &hdr, sizeof(hdr));
 	return sizeof(hdr) + size;
@@ -96,8 +101,10 @@ static size_t corrupt(uint8_t *frame, size_t len, const char *how)
 	struct m33_link_hdr hdr;
 
 	memcpy(&hdr, frame, sizeof(hdr));
+
 	if (!strcmp(how, "short"))
 		return 6;
+
 	if (!strcmp(how, "magic"))
 		hdr.magic ^= 0xFFFF;
 	else if (!strcmp(how, "version"))
@@ -106,8 +113,12 @@ static size_t corrupt(uint8_t *frame, size_t len, const char *how)
 		hdr.len += 4;
 	else if (!strcmp(how, "type"))
 		hdr.type = M33_LINK_PONG;
-	if (!strcmp(how, "type"))
+	else if (!strcmp(how, "statslen"))
+		hdr.type = M33_LINK_GET_STATS;
+
+	if (!strcmp(how, "type") || !strcmp(how, "statslen"))
 		hdr.crc16 = m33_link_frame_crc(&hdr, frame + sizeof(hdr));
+
 	memcpy(frame, &hdr, sizeof(hdr));
 	if (!strcmp(how, "crc"))
 		frame[sizeof(hdr)] ^= 0x01;
@@ -165,6 +176,42 @@ static int run_negative(int fd, const struct opts *o)
 	memcpy(&nack, payload, sizeof(nack));
 	printf("negative %s: NACK err=%u seq=0x%x rx_ok=%u rx_bad=%u\n", o->bad, nack.err,
 	       hdr.seq, nack.rx_ok, nack.rx_bad);
+	return 0;
+}
+
+static int run_stats(int fd, const struct opts *o)
+{
+	uint8_t frame[M33_LINK_HDR_SIZE], payload[M33_LINK_FRAME_MAX];
+	const uint32_t seq = 0x57A7;
+	struct m33_link_hdr hdr = {
+		.magic = M33_LINK_MAGIC,
+		.ver = M33_LINK_VERSION,
+		.type = M33_LINK_GET_STATS,
+		.seq = seq,
+		.len = 0,
+	};
+	struct m33_link_stats st;
+	int ret;
+
+	hdr.crc16 = m33_link_frame_crc(&hdr, NULL);
+	memcpy(frame, &hdr, sizeof(hdr));
+	if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
+		printf("stats: write failed: %s\n", strerror(errno));
+		return 1;
+	}
+	ret = read_reply(fd, &hdr, payload, o->timeout_ms);
+	if (ret) {
+		printf("stats: no valid reply (%s)\n", strerror(-ret));
+		return 1;
+	}
+	if (hdr.type != M33_LINK_STATS || hdr.len != sizeof(st) || hdr.seq != seq) {
+		printf("stats: expected STATS seq 0x%x, got type %u len %u seq 0x%x\n",
+		       seq, hdr.type, hdr.len, hdr.seq);
+		return 1;
+	}
+	memcpy(&st, payload, sizeof(st));
+	printf("stats: rx_ok=%u rx_bad=%u last_err=%u tick_ms=%u\n",
+	       st.rx_ok, st.rx_bad, st.last_err, st.tick_ms);
 	return 0;
 }
 
@@ -236,7 +283,7 @@ int main(int argc, char **argv)
 	};
 	int opt, fd, ret;
 
-	while ((opt = getopt(argc, argv, "d:n:s:t:o:x:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:n:s:t:o:x:S")) != -1) {
 		switch (opt) {
 		case 'd': o.tty = optarg; break;
 		case 'n': o.count = (unsigned int)strtoul(optarg, NULL, 0); break;
@@ -244,9 +291,10 @@ int main(int argc, char **argv)
 		case 't': o.timeout_ms = atoi(optarg); break;
 		case 'o': o.csv = optarg; break;
 		case 'x': o.bad = optarg; break;
+		case 'S': o.stats = 1; break;
 		default:
 			fprintf(stderr, "usage: %s [-d tty] [-n count] [-s payload] [-t ms] [-o csv] "
-				"[-x short|magic|version|len|crc|type]\n", argv[0]);
+				"[-x short|magic|version|len|crc|type|statslen] [-S]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -260,7 +308,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "open %s: %s\n", o.tty, strerror(errno));
 		return 1;
 	}
-	ret = o.bad ? run_negative(fd, &o) : run_ping(fd, &o);
+	ret = o.bad ? run_negative(fd, &o) : o.stats ? run_stats(fd, &o) : run_ping(fd, &o);
 	close(fd);
 	return ret;
 }
