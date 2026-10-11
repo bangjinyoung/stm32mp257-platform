@@ -38,7 +38,7 @@ STM32MP257F-DK 보드에서 Cortex-A35 Linux와 Cortex-M33 FreeRTOS를 함께 �
 | RTOS | 잘못된 firmware (없음, 너무 작음, ELF 아님) 거부 | 검증함 | `Boot failed: -2 / -22`, Linux 유지 |
 | RTOS | M33 console: HW 정보 출력, UART RX interrupt → uptime, LED 100 ms | 검증함 | tick 간격 5006 ms vs host 5.005 s, LED toggle 50회 / 5 s |
 | IPC | RPMsg TTY echo, 메시지 오류 처리, round-trip latency | 진행 전 | — |
-| 설계 | RTOS → Linux migration 분석 | 설계만 | `docs/architecture.md` §5. 구현이나 측정 결과가 아님 |
+| 설계 | RTOS → Linux 기능 분리 | 기준과 실제 구성 대응, 이후 단계는 설계만 | `docs/architecture.md` §6 |
 
 전체 항목과 측정 방법은 `docs/evidence-index.md`에 있습니다.
 
